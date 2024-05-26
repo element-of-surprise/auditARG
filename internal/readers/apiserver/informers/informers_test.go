@@ -1,10 +1,12 @@
-package reader
+package informers
 
 import (
 	"context"
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/element-of-surprise/auditARG/internal/readers/data"
 
 	"github.com/kylelemons/godebug/pretty"
 	corev1 "k8s.io/api/core/v1"
@@ -17,8 +19,8 @@ func TestClose(t *testing.T) {
 
 	stop := make(chan struct{})
 
-	c := &Changes{
-		ch:   make(chan Data, 1),
+	c := &Reader{
+		ch:   make(chan data.Entry, 1),
 		stop: stop,
 		indexes: []cache.SharedIndexInformer{
 			timedInformers{
@@ -126,7 +128,7 @@ func TestTypeInform(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		c := &Changes{informer: test.factory}
+		c := &Reader{informer: test.factory}
 		c.handlers = cache.ResourceEventHandlerFuncs{
 			AddFunc:    c.addHandler,
 			UpdateFunc: c.updateHandler,
@@ -171,79 +173,97 @@ func TestAddOrDelete(t *testing.T) {
 	tests := []struct {
 		name    string
 		obj     any
-		ct      ChangeType
-		want    Data
+		ct      data.ChangeType
+		want    data.Informer
 		wantErr bool
 	}{
 		{
 			name:    "Error: obj is nil",
-			ct:      CTAdd,
+			ct:      data.CTAdd,
 			wantErr: true,
 		},
 		{
 			name:    "Error: unsupported type",
 			obj:     &corev1.NodeAddress{},
-			ct:      CTAdd,
+			ct:      data.CTAdd,
 			wantErr: true,
 		},
 		{
 			name: "Node add",
 			obj:  &corev1.Node{},
-			ct:   CTAdd,
-			want: Data{
-				Type: DTNode,
-				Node: Change[corev1.Node]{Type: CTAdd, New: corev1.Node{}},
-			},
+			ct:   data.CTAdd,
+			want: MustInformer(
+				data.Change[*corev1.Node]{
+					ChangeType: data.CTAdd,
+					ObjectType: data.OTNode,
+					New:        &corev1.Node{},
+				},
+			),
 		},
 		{
 			name: "Pod add",
 			obj:  &corev1.Pod{},
-			ct:   CTAdd,
-			want: Data{
-				Type: DTPod,
-				Pod:  Change[corev1.Pod]{Type: CTAdd, New: corev1.Pod{}},
-			},
+			ct:   data.CTAdd,
+			want: MustInformer(
+				data.Change[*corev1.Pod]{
+					ChangeType: data.CTAdd,
+					ObjectType: data.OTPod,
+					New:        &corev1.Pod{},
+				},
+			),
 		},
 		{
 			name: "Namespace add",
 			obj:  &corev1.Namespace{},
-			ct:   CTAdd,
-			want: Data{
-				Type:      DTNamespace,
-				Namespace: Change[corev1.Namespace]{Type: CTAdd, New: corev1.Namespace{}},
-			},
+			ct:   data.CTAdd,
+			want: MustInformer(
+				data.Change[*corev1.Namespace]{
+					ChangeType: data.CTAdd,
+					ObjectType: data.OTNamespace,
+					New:        &corev1.Namespace{},
+				},
+			),
 		},
 		{
 			name: "Node delete",
 			obj:  &corev1.Node{},
-			ct:   CTDelete,
-			want: Data{
-				Type: DTNode,
-				Node: Change[corev1.Node]{Type: CTDelete, Old: corev1.Node{}},
-			},
+			ct:   data.CTDelete,
+			want: MustInformer(
+				data.Change[*corev1.Node]{
+					ChangeType: data.CTDelete,
+					ObjectType: data.OTNode,
+					Old:        &corev1.Node{},
+				},
+			),
 		},
 		{
 			name: "Pod delete",
 			obj:  &corev1.Pod{},
-			ct:   CTDelete,
-			want: Data{
-				Type: DTPod,
-				Pod:  Change[corev1.Pod]{Type: CTDelete, Old: corev1.Pod{}},
-			},
+			ct:   data.CTDelete,
+			want: MustInformer(
+				data.Change[*corev1.Pod]{
+					ChangeType: data.CTDelete,
+					ObjectType: data.OTPod,
+					Old:        &corev1.Pod{},
+				},
+			),
 		},
 		{
 			name: "Namespace delete",
 			obj:  &corev1.Namespace{},
-			ct:   CTDelete,
-			want: Data{
-				Type:      DTNamespace,
-				Namespace: Change[corev1.Namespace]{Type: CTDelete, Old: corev1.Namespace{}},
-			},
+			ct:   data.CTDelete,
+			want: MustInformer(
+				data.Change[*corev1.Namespace]{
+					ChangeType: data.CTDelete,
+					ObjectType: data.OTNamespace,
+					Old:        &corev1.Namespace{},
+				},
+			),
 		},
 	}
 
 	for _, test := range tests {
-		c := &Changes{ch: make(chan Data, 1)}
+		c := &Reader{ch: make(chan data.Entry, 1)}
 
 		err := c.addOrDelete(test.obj, test.ct)
 		switch {
@@ -256,8 +276,13 @@ func TestAddOrDelete(t *testing.T) {
 		case err != nil:
 			continue
 		}
+		e := <-c.ch
+		got, err := e.Informer()
+		if err != nil {
+			t.Errorf("TestAddOrDelete(%s): got err == %v, want err == nil", test.name, err)
+		}
 
-		if diff := pretty.Compare(test.want, <-c.ch); diff != "" {
+		if diff := pretty.Compare(test.want, got); diff != "" {
 			t.Errorf("TestAddOrDelete(%s): -want/+got\n%s", test.name, diff)
 		}
 	}
@@ -269,7 +294,7 @@ func TestUpdate(t *testing.T) {
 	tests := []struct {
 		name           string
 		oldObj, newObj any
-		want           Data
+		want           data.Informer
 		wantErr        bool
 	}{
 		{
@@ -298,33 +323,43 @@ func TestUpdate(t *testing.T) {
 			name:   "Node update",
 			oldObj: &corev1.Node{},
 			newObj: &corev1.Node{},
-			want: Data{
-				Type: DTNode,
-				Node: Change[corev1.Node]{Type: CTUpdate, New: corev1.Node{}, Old: corev1.Node{}},
-			},
+			want: MustInformer(data.Change[*corev1.Node]{
+				ChangeType: data.CTUpdate,
+				ObjectType: data.OTNode,
+				New:        &corev1.Node{},
+				Old:        &corev1.Node{},
+			}),
 		},
 		{
 			name:   "Pod update",
 			oldObj: &corev1.Pod{},
 			newObj: &corev1.Pod{},
-			want: Data{
-				Type: DTPod,
-				Pod:  Change[corev1.Pod]{Type: CTUpdate, New: corev1.Pod{}, Old: corev1.Pod{}},
-			},
+			want: MustInformer(
+				data.Change[*corev1.Pod]{
+					ChangeType: data.CTUpdate,
+					ObjectType: data.OTPod,
+					New:        &corev1.Pod{},
+					Old:        &corev1.Pod{},
+				},
+			),
 		},
 		{
 			name:   "Namespace update",
 			oldObj: &corev1.Namespace{},
 			newObj: &corev1.Namespace{},
-			want: Data{
-				Type:      DTNamespace,
-				Namespace: Change[corev1.Namespace]{Type: CTUpdate, New: corev1.Namespace{}, Old: corev1.Namespace{}},
-			},
+			want: MustInformer(
+				data.Change[*corev1.Namespace]{
+					ChangeType: data.CTUpdate,
+					ObjectType: data.OTNamespace,
+					New:        &corev1.Namespace{},
+					Old:        &corev1.Namespace{},
+				},
+			),
 		},
 	}
 
 	for _, test := range tests {
-		c := &Changes{ch: make(chan Data, 1)}
+		c := &Reader{ch: make(chan data.Entry, 1)}
 
 		err := c.update(test.oldObj, test.newObj)
 		switch {
@@ -338,8 +373,22 @@ func TestUpdate(t *testing.T) {
 			continue
 		}
 
-		if diff := pretty.Compare(test.want, <-c.ch); diff != "" {
+		e := <-c.ch
+		got, err := e.Informer()
+		if err != nil {
+			t.Errorf("TestUpdate(%s): got err == %v, want err == nil", test.name, err)
+		}
+
+		if diff := pretty.Compare(test.want, got); diff != "" {
 			t.Errorf("TestUpdate(%s): -want/+got\n%s", test.name, diff)
 		}
 	}
+}
+
+func MustInformer[T data.K8Object](v data.Change[T]) data.Informer {
+	i, err := data.NewInformer(v)
+	if err != nil {
+		panic(err)
+	}
+	return i
 }

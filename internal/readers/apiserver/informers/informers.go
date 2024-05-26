@@ -33,7 +33,9 @@ Usage:
 		// Do something
 	}
 
-	for data := range c.Stream() {
+	for entry := range c.Stream() {
+		data, _ := entry.Informer() // Won't get an error because we know the type.
+
 		switch data.Type {
 		case DTNode:
 			switch data.Node.Type {
@@ -42,6 +44,8 @@ Usage:
 			case CTUpdate:
 				// Do something
 			case CTDelete:
+				// Do something
+			default:
 				// Do something
 			}
 		case DTPod:
@@ -52,11 +56,13 @@ Usage:
 				// Do something
 			case CTDelete:
 				// Do something
+			default:
+				// Do something
 			}
 		}
 	}
 */
-package reader
+package informers
 
 import (
 	"context"
@@ -65,86 +71,31 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/element-of-surprise/auditARG/internal/readers/data"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/cache"
 )
 
-//go:generate stringer -type=DataType
-
-// DataType is the type of the data.
-type DataType uint8
-
-const (
-	// DTUnknown indicates a bug in the code.
-	DTUnknown DataType = 0
-	// DTNode indicates the data is a node.
-	DTNode DataType = 1
-	// DTPod indicates the data is a pod.
-	DTPod DataType = 2
-	// DTNamespace indicates the data is a namespace.
-	DTNamespace DataType = 3
-)
-
-// Data is the data that is passed through the pipeline for a request.
-// Note: This data type is field aligned for better performance.
-type Data struct {
-	// Node is the node data. This is only valid if Type is Node.
-	Node Change[corev1.Node]
-	// Pod is the pod data. This is only valid if Type is Pod.
-	Pod Change[corev1.Pod]
-	// Namespace is the namespace data. This is only valid if Type is Namespace.
-	Namespace Change[corev1.Namespace]
-
-	// Type is the type of the data.
-	Type DataType
-}
-
-//go:generate stringer -type=ChangeType
-
-// ChangeType is the type of change.
-type ChangeType uint8
-
-const (
-	// CTUnknown indicates a bug in the code.
-	CTUnknown ChangeType = 0
-	// CTAdd indicates the data was added.
-	CTAdd ChangeType = 1
-	// CTUpdate indicates the data was updated.
-	CTUpdate ChangeType = 2
-	// CTDelete indicates the data was deleted.
-	CTDelete ChangeType = 3
-)
-
-// Change is a change made to a data set.
-// Note: This data type is field aligned for better performance.
-type Change[T any] struct {
-	// Old is the old data. This is only valid if Type is Update or Delete.
-	Old T
-	// New is the new data. This is only valid if Type is Add or Update.
-	New T
-	// Type is the type of the change.
-	Type ChangeType
-}
-
-// Changes are changes made to data sets on the APIServer.
-type Changes struct {
+// Reader reports changes made to data objects on the APIServer via the informers API.
+type Reader struct {
 	informer informers.SharedInformerFactory
 	indexes  []cache.SharedIndexInformer
 	handlers cache.ResourceEventHandlerFuncs
 
-	ch   chan Data
+	ch   chan data.Entry
 	stop chan struct{}
 
 	log *slog.Logger
 }
 
 // Option is an option for New(). Unused for now.
-type Option func(*Changes) error
+type Option func(*Reader) error
 
 // WithLogger sets the logger for the Changes object.
 func WithLogger(log *slog.Logger) Option {
-	return func(c *Changes) error {
+	return func(c *Reader) error {
 		c.log = log
 		return nil
 	}
@@ -164,12 +115,12 @@ const (
 )
 
 // New creates a new Changes object. retrieveTypes is a bitwise flag to determine what data to retrieve.
-func New(informer informers.SharedInformerFactory, retrieveTypes RetrieveType, opts ...Option) (*Changes, error) {
+func New(informer informers.SharedInformerFactory, retrieveTypes RetrieveType, opts ...Option) (*Reader, error) {
 	if informer == nil {
 		return nil, fmt.Errorf("informer is nil")
 	}
 
-	c := &Changes{
+	c := &Reader{
 		informer: informer,
 		stop:     make(chan struct{}),
 	}
@@ -186,7 +137,7 @@ func New(informer informers.SharedInformerFactory, retrieveTypes RetrieveType, o
 	}
 
 	if c.ch == nil {
-		c.ch = make(chan Data, 5000)
+		c.ch = make(chan data.Entry, 5000)
 	}
 	if c.log == nil {
 		c.log = slog.Default()
@@ -234,7 +185,7 @@ var closeDelay = 100 * time.Millisecond
 
 // Close closes the Changes object. This will block until all indexes are stopped.
 // If the context is canceled, it will return the context error.
-func (c *Changes) Close(ctx context.Context) error {
+func (c *Reader) Close(ctx context.Context) error {
 	close(c.stop)
 	defer close(c.ch)
 
@@ -252,12 +203,12 @@ start:
 }
 
 // Stream returns the data stream.
-func (c *Changes) Stream() <-chan Data {
+func (c *Reader) Stream() <-chan data.Entry {
 	return c.ch
 }
 
 // nodeInform sets up the node informer.
-func (c *Changes) nodeInform() (cache.InformerSynced, error) {
+func (c *Reader) nodeInform() (cache.InformerSynced, error) {
 	nodeInformer := c.informer.Core().V1().Nodes().Informer()
 	reg, err := nodeInformer.AddEventHandler(c.handlers)
 	if err != nil {
@@ -268,7 +219,7 @@ func (c *Changes) nodeInform() (cache.InformerSynced, error) {
 }
 
 // podInform sets up the pod informer.
-func (c *Changes) podInform() (cache.InformerSynced, error) {
+func (c *Reader) podInform() (cache.InformerSynced, error) {
 	podInformer := c.informer.Core().V1().Pods().Informer()
 	reg, err := podInformer.AddEventHandler(c.handlers)
 	if err != nil {
@@ -279,7 +230,7 @@ func (c *Changes) podInform() (cache.InformerSynced, error) {
 }
 
 // namespaceInform sets up the namespace informer.
-func (c *Changes) namespaceInform() (cache.InformerSynced, error) {
+func (c *Reader) namespaceInform() (cache.InformerSynced, error) {
 	namespaceInformer := c.informer.Core().V1().Namespaces().Informer()
 	reg, err := namespaceInformer.AddEventHandler(c.handlers)
 	if err != nil {
@@ -290,14 +241,14 @@ func (c *Changes) namespaceInform() (cache.InformerSynced, error) {
 }
 
 // addHandler is the event handler for adding data. This is a shim around addOrDelete.
-func (c *Changes) addHandler(obj any) {
-	err := c.addOrDelete(obj, CTAdd)
+func (c *Reader) addHandler(obj any) {
+	err := c.addOrDelete(obj, data.CTAdd)
 	if err != nil {
 		c.log.Error(err.Error())
 	}
 }
 
-func (c *Changes) updateHandler(oldObj any, newObj any) {
+func (c *Reader) updateHandler(oldObj any, newObj any) {
 	err := c.update(oldObj, newObj)
 	if err != nil {
 		c.log.Error(err.Error())
@@ -305,62 +256,80 @@ func (c *Changes) updateHandler(oldObj any, newObj any) {
 }
 
 // deleteHandler is the event handler for deleting data. This is a shim around addOrDelete.
-func (c *Changes) deleteHandler(obj any) {
-	err := c.addOrDelete(obj, CTDelete)
+func (c *Reader) deleteHandler(obj any) {
+	err := c.addOrDelete(obj, data.CTDelete)
 	if err != nil {
 		c.log.Error(err.Error())
 	}
 }
 
 // addOrDelete handles event types add and delete.
-func (c *Changes) addOrDelete(obj any, ct ChangeType) error {
+func (c *Reader) addOrDelete(obj any, ct data.ChangeType) error {
 	if obj == nil {
 		return fmt.Errorf("Changes.addOrDelete(): obj cannot be nil")
 	}
 
-	var d Data
+	var d data.Informer
 	switch v := obj.(type) {
 	case *corev1.Node:
-		d.Type = DTNode
-		d.Node = Change[corev1.Node]{Type: ct}
+		node := data.Change[*corev1.Node]{ChangeType: ct, ObjectType: data.OTNode}
 		switch ct {
-		case CTAdd:
-			d.Node.New = *v
-		case CTDelete:
-			d.Node.Old = *v
+		case data.CTAdd:
+			node.New = v
+		case data.CTDelete:
+			node.Old = v
 		default:
 			return fmt.Errorf("unsupported change type in Changes.addOrDelete(): %d", ct)
+		}
+		var err error
+		d, err = data.NewInformer(node)
+		if err != nil {
+			return err
 		}
 	case *corev1.Pod:
-		d.Type = DTPod
-		d.Pod = Change[corev1.Pod]{Type: ct}
+		d.Type = data.OTPod
+		pod := data.Change[*corev1.Pod]{ChangeType: ct, ObjectType: data.OTPod}
 		switch ct {
-		case CTAdd:
-			d.Pod.New = *v
-		case CTDelete:
-			d.Pod.Old = *v
+		case data.CTAdd:
+			pod.New = v
+		case data.CTDelete:
+			pod.Old = v
 		default:
 			return fmt.Errorf("unsupported change type in Changes.addOrDelete(): %d", ct)
 		}
+		var err error
+		d, err = data.NewInformer(pod)
+		if err != nil {
+			return err
+		}
 	case *corev1.Namespace:
-		d.Type = DTNamespace
-		d.Namespace = Change[corev1.Namespace]{Type: ct}
+		ns := data.Change[*corev1.Namespace]{ChangeType: ct, ObjectType: data.OTNamespace}
 		switch ct {
-		case CTAdd:
-			d.Namespace.New = *v
-		case CTDelete:
-			d.Namespace.Old = *v
+		case data.CTAdd:
+			ns.New = v
+		case data.CTDelete:
+			ns.Old = v
+		}
+		var err error
+		d, err = data.NewInformer(ns)
+		if err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("unknown object type: %T", obj)
 	}
 
-	c.ch <- d
+	e, err := data.NewEntry(d)
+	if err != nil {
+		return err
+	}
+
+	c.ch <- e
 	return nil
 }
 
 // update is the event handler for updating data.
-func (c *Changes) update(oldObj any, newObj any) error {
+func (c *Reader) update(oldObj any, newObj any) error {
 	if oldObj == nil || newObj == nil {
 		return fmt.Errorf("Changes.update(): oldObj and newObj cannot be nil")
 	}
@@ -372,27 +341,55 @@ func (c *Changes) update(oldObj any, newObj any) error {
 		return fmt.Errorf("Changes.update(): oldObj(%T) and newObj(%T) are not the same type", oldObj, newObj)
 	}
 
-	var d Data
+	var d data.Informer
 	switch v := newObj.(type) {
 	case *corev1.Node:
-		d.Type = DTNode
-		d.Node = Change[corev1.Node]{Type: CTUpdate}
-		d.Node.New = *v
-		d.Node.Old = *oldObj.(*corev1.Node)
+		node := data.Change[*corev1.Node]{
+			ChangeType: data.CTUpdate,
+			ObjectType: data.OTNode,
+			New:        v,
+			Old:        oldObj.(*corev1.Node),
+		}
+
+		var err error
+		d, err = data.NewInformer(node)
+		if err != nil {
+			return err
+		}
 	case *corev1.Pod:
-		d.Type = DTPod
-		d.Pod = Change[corev1.Pod]{Type: CTUpdate}
-		d.Pod.New = *v
-		d.Pod.Old = *oldObj.(*corev1.Pod)
+		pod := data.Change[*corev1.Pod]{
+			ChangeType: data.CTUpdate,
+			ObjectType: data.OTPod,
+			New:        v,
+			Old:        oldObj.(*corev1.Pod),
+		}
+		var err error
+		d, err = data.NewInformer(pod)
+		if err != nil {
+			return err
+		}
 	case *corev1.Namespace:
-		d.Type = DTNamespace
-		d.Namespace = Change[corev1.Namespace]{Type: CTUpdate}
-		d.Namespace.New = *v
-		d.Namespace.Old = *oldObj.(*corev1.Namespace)
+		ns := data.Change[*corev1.Namespace]{
+			ChangeType: data.CTUpdate,
+			ObjectType: data.OTNamespace,
+			New:        v,
+			Old:        oldObj.(*corev1.Namespace),
+		}
+
+		var err error
+		d, err = data.NewInformer(ns)
+		if err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("unknown object type: %T", newObj)
 	}
 
-	c.ch <- d
+	e, err := data.NewEntry(d)
+	if err != nil {
+		return err
+	}
+
+	c.ch <- e
 	return nil
 }
