@@ -116,12 +116,13 @@ func (s *Secrets) scrubPod(p *corev1.Pod) {
 }
 
 var secretRE = regexp.MustCompile(`(?i)(token|pass|jwt|hash|secret|bearer|cred|secure|signing|cert|code|key)`)
+var redacted = "REDACTED"
 
 // scrubContainer scrubs sensitive information from a container.
 func (s *Secrets) scrubContainer(c corev1.Container) corev1.Container {
 	for i, ev := range c.Env {
 		if secretRE.MatchString(ev.Name) {
-			ev.Value = "REDACTED"
+			ev.Value = redacted
 			c.Env[i] = ev
 		}
 	}

@@ -61,6 +61,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	batcherOut := make(chan batching.Batches, 1)
 	_, err = batching.New(secretsOut, batcherOut, 5*time.Second)
 	if err != nil {
