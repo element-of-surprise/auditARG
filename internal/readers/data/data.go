@@ -236,5 +236,6 @@ func (c Change[T]) UID() (types.UID, error) {
 	case CTDelete:
 		return c.Old.GetUID(), nil
 	}
-	return types.UID(""), fmt.Errorf("unknown ChangeType: %v", c.ChangeType)
+	ct := c.ChangeType // Prevents Change[T] heap allocation because of Errorf.
+	return types.UID(""), fmt.Errorf("unknown ChangeType: %v", ct)
 }

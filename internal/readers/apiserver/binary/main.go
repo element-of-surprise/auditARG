@@ -12,6 +12,7 @@ import (
 	ireader "github.com/element-of-surprise/auditARG/internal/readers/apiserver/informers"
 	"github.com/element-of-surprise/auditARG/internal/readers/data"
 	"github.com/element-of-surprise/auditARG/internal/readers/safety"
+	"github.com/element-of-surprise/auditARG/internal/routing"
 
 	"github.com/go-json-experiment/json"
 	"github.com/go-json-experiment/json/jsontext"
@@ -68,9 +69,23 @@ func main() {
 		panic(err)
 	}
 
-	for batches := range batcherOut {
-		log.Println("Received batchs")
-		for entry := range batches.Iter(bkCtx) {
+	router, err := routing.New(batcherOut)
+	if err != nil {
+		panic(err)
+	}
+
+	logInformersIn := make(chan batching.Batches, 1)
+
+	router.Register(bkCtx, "logInformers", logInformersIn)
+	router.Start(bkCtx)
+
+	logInformers(bkCtx, logInformersIn) // blocks
+}
+
+func logInformers(ctx context.Context, in chan batching.Batches) {
+	for batches := range in {
+		log.Println("Received batch")
+		for entry := range batches.Iter(ctx) {
 			switch entry.Type {
 			case data.ETInformer:
 				d, err := entry.Informer()
