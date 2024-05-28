@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/element-of-surprise/auditARG/internal/readers/data"
+	"github.com/element-of-surprise/auditARG/tattler/internal/readers/data"
 
 	"github.com/kylelemons/godebug/pretty"
 	corev1 "k8s.io/api/core/v1"

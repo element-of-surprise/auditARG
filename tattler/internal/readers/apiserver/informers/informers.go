@@ -71,7 +71,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/element-of-surprise/auditARG/internal/readers/data"
+	"github.com/element-of-surprise/auditARG/tattler/internal/readers/data"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
@@ -83,11 +83,12 @@ type Reader struct {
 	informer informers.SharedInformerFactory
 	indexes  []cache.SharedIndexInformer
 	handlers cache.ResourceEventHandlerFuncs
+	syncers  []cache.InformerSynced
 
-	ch   chan data.Entry
-	stop chan struct{}
-
-	log *slog.Logger
+	ch      chan data.Entry
+	stop    chan struct{}
+	started bool
+	log     *slog.Logger
 }
 
 // Option is an option for New(). Unused for now.
@@ -136,9 +137,6 @@ func New(informer informers.SharedInformerFactory, retrieveTypes RetrieveType, o
 		}
 	}
 
-	if c.ch == nil {
-		c.ch = make(chan data.Entry, 5000)
-	}
 	if c.log == nil {
 		c.log = slog.Default()
 	}
@@ -147,13 +145,13 @@ func New(informer informers.SharedInformerFactory, retrieveTypes RetrieveType, o
 		return nil, fmt.Errorf("no data types to retrieve")
 	}
 
-	syncers := make([]cache.InformerSynced, 0, 2)
+	c.syncers = make([]cache.InformerSynced, 0, 2)
 	if retrieveTypes&RTNode == RTNode {
 		s, err := c.nodeInform()
 		if err != nil {
 			return nil, err
 		}
-		syncers = append(syncers, s)
+		c.syncers = append(c.syncers, s)
 	}
 
 	if retrieveTypes&RTPod == RTPod {
@@ -161,7 +159,7 @@ func New(informer informers.SharedInformerFactory, retrieveTypes RetrieveType, o
 		if err != nil {
 			return nil, err
 		}
-		syncers = append(syncers, s)
+		c.syncers = append(c.syncers, s)
 	}
 
 	if retrieveTypes&RTNamespace == RTNamespace {
@@ -169,13 +167,7 @@ func New(informer informers.SharedInformerFactory, retrieveTypes RetrieveType, o
 		if err != nil {
 			return nil, err
 		}
-		syncers = append(syncers, s)
-	}
-
-	informer.Start(c.stop)
-
-	if !cache.WaitForCacheSync(c.stop, syncers...) {
-		return nil, fmt.Errorf("failed to sync cache")
+		c.syncers = append(c.syncers, s)
 	}
 
 	return c, nil
@@ -202,9 +194,33 @@ start:
 	return nil
 }
 
-// Stream returns the data stream.
-func (c *Reader) Stream() <-chan data.Entry {
-	return c.ch
+// Run starts the Reader.
+func (c *Reader) Run(ctx context.Context) error {
+	if c.started {
+		return fmt.Errorf("cannot call Run once the Reader has already started")
+	}
+	if c.ch == nil {
+		return fmt.Errorf("cannot call Run if SetOut has not been called(%v)", c.ch)
+	}
+	c.informer.Start(c.stop)
+
+	if !cache.WaitForCacheSync(c.stop, c.syncers...) {
+		close(c.stop)
+		c.stop = make(chan struct{})
+		return fmt.Errorf("failed to sync cache")
+	}
+	c.started = true
+
+	return nil
+}
+
+// SetOut sets the output channel for data to flow out on.
+func (c *Reader) SetOut(ctx context.Context, out chan data.Entry) error {
+	if c.started {
+		return fmt.Errorf("cannot call SetOut once the Reader has had Start() called")
+	}
+	c.ch = out
+	return nil
 }
 
 // nodeInform sets up the node informer.

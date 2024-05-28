@@ -25,7 +25,7 @@ import (
 	"log/slog"
 	"regexp"
 
-	"github.com/element-of-surprise/auditARG/internal/readers/data"
+	"github.com/element-of-surprise/auditARG/tattler/internal/readers/data"
 
 	corev1 "k8s.io/api/core/v1"
 )

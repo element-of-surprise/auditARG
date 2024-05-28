@@ -8,11 +8,10 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/element-of-surprise/auditARG/internal/batching"
-	ireader "github.com/element-of-surprise/auditARG/internal/readers/apiserver/informers"
-	"github.com/element-of-surprise/auditARG/internal/readers/data"
-	"github.com/element-of-surprise/auditARG/internal/readers/safety"
-	"github.com/element-of-surprise/auditARG/internal/routing"
+	"github.com/element-of-surprise/auditARG/tattler"
+	"github.com/element-of-surprise/auditARG/tattler/internal/batching"
+	ireader "github.com/element-of-surprise/auditARG/tattler/internal/readers/apiserver/informers"
+	"github.com/element-of-surprise/auditARG/tattler/internal/readers/data"
 
 	"github.com/go-json-experiment/json"
 	"github.com/go-json-experiment/json/jsontext"
@@ -28,6 +27,10 @@ import (
 
 func main() {
 	bkCtx := context.Background()
+
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 
 	var kubeconfig string
 	if home := homedir.HomeDir(); home != "" {
@@ -46,42 +49,38 @@ func main() {
 		panic(err.Error())
 	}
 
-	informerFactory := informers.NewSharedInformerFactory(clientset, 5*time.Minute)
+	tattlerInput := make(chan data.Entry, 5000)
+
+	t, err := tattler.New(tattlerInput, 5*time.Minute)
+	if err != nil {
+		panic(err)
+	}
+
+	// Setup reader for APIServer informers.
+	informerFactory := informers.NewSharedInformerFactory(clientset, 5*time.Second)
 
 	r, err := ireader.New(informerFactory, ireader.RTNode|ireader.RTPod|ireader.RTNamespace)
 	if err != nil {
-		panic(err.Error())
-	}
-
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
-
-	secretsOut := make(chan data.Entry, 1)
-	_, err = safety.New(r.Stream(), secretsOut)
-	if err != nil {
 		panic(err)
 	}
+	t.AddReader(bkCtx, r)
 
-	batcherOut := make(chan batching.Batches, 1)
-	_, err = batching.New(secretsOut, batcherOut, 5*time.Second)
-	if err != nil {
-		panic(err)
-	}
-
-	router, err := routing.New(batcherOut)
-	if err != nil {
-		panic(err)
-	}
-
+	// Add processors for output.
 	logInformersIn := make(chan batching.Batches, 1)
 
-	router.Register(bkCtx, "logInformers", logInformersIn)
-	router.Start(bkCtx)
+	if err := t.AddProcessor(bkCtx, "logInformers", logInformersIn); err != nil {
+		panic(err)
+	}
 
+	if err := t.Start(bkCtx); err != nil {
+		panic(err)
+	}
+	log.Println("Started")
 	logInformers(bkCtx, logInformersIn) // blocks
+	log.Println("exiting")
 }
 
+// logInformers is a processor that prints out data in JSON form for data from an Informer.
 func logInformers(ctx context.Context, in chan batching.Batches) {
 	for batches := range in {
 		log.Println("Received batch")

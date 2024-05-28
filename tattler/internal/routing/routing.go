@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/element-of-surprise/auditARG/internal/batching"
+	"github.com/element-of-surprise/auditARG/tattler/internal/batching"
 	"github.com/gostdlib/concurrency/prim/wait"
 )
 

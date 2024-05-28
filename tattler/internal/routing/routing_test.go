@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/element-of-surprise/auditARG/internal/batching"
+	"github.com/element-of-surprise/auditARG/tattler/internal/batching"
 	"github.com/kylelemons/godebug/pretty"
 )
 

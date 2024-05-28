@@ -43,7 +43,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/element-of-surprise/auditARG/internal/readers/data"
+	"github.com/element-of-surprise/auditARG/tattler/internal/readers/data"
 
 	"k8s.io/apimachinery/pkg/types"
 )
