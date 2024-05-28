@@ -6,6 +6,7 @@ package data
 import (
 	"errors"
 	"fmt"
+	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -57,6 +58,15 @@ func NewEntry(data SourceData) (Entry, error) {
 		return Entry{data: data, Type: ETInformer}, nil
 	}
 	return Entry{}, ErrInvalidType
+}
+
+// MustNewEntry creates a new Entry. It panics if an error occurs.
+func MustNewEntry(data SourceData) Entry {
+	e, err := NewEntry(data)
+	if err != nil {
+		panic(err)
+	}
+	return e
 }
 
 // UID returns the UID of the underlying object. This is always the latest change.
@@ -114,12 +124,25 @@ type Informer struct {
 
 // NewInformer creates a new Informer. Data must be a Change type.
 func NewInformer[T K8Object](change Change[T]) (Informer, error) {
+	if err := change.Validate(); err != nil {
+		return Informer{}, err
+	}
 	uid, err := change.UID()
 	if err != nil {
 		return Informer{}, err
 	}
 
 	return Informer{data: change, uid: uid, Type: change.ObjectType}, nil
+}
+
+// MustNewInformer creates a new Informer. It panics if an error occurs.
+// Data must be a Change type.
+func MustNewInformer[T K8Object](change Change[T]) Informer {
+	i, err := NewInformer(change)
+	if err != nil {
+		panic(err)
+	}
+	return i
 }
 
 // GetUID returns the UID of the underlying object.
@@ -224,6 +247,72 @@ type Change[T K8Object] struct {
 	ChangeType ChangeType
 	// ObjectType is the type of the object.
 	ObjectType ObjectType
+}
+
+// NewChange creates a new Change. This function validates the change.
+func NewChange[T K8Object](newObj, oldObj T, ct ChangeType) (Change[T], error) {
+	if ct == CTUnknown {
+		return Change[T]{}, ErrInvalidType
+	}
+
+	newIsZero := reflect.ValueOf(newObj).IsZero()
+	oldIsZero := reflect.ValueOf(oldObj).IsZero()
+
+	if newIsZero && oldIsZero {
+		return Change[T]{}, fmt.Errorf("new and old are both empty")
+	}
+
+	if ct == CTAdd && (newIsZero || !oldIsZero) {
+		return Change[T]{}, fmt.Errorf("Change for add incorrect")
+	}
+	if ct == CTUpdate && (newIsZero || oldIsZero) {
+		return Change[T]{}, fmt.Errorf("Change for update has new or old empty")
+	}
+	if ct == CTDelete && (oldIsZero || !newIsZero) {
+		return Change[T]{}, fmt.Errorf("Change for delete incorrect")
+	}
+
+	var ot ObjectType
+	switch any(newObj).(type) {
+	case *corev1.Node:
+		ot = OTNode
+	case *corev1.Pod:
+		ot = OTPod
+	case *corev1.Namespace:
+		ot = OTNamespace
+	default:
+		return Change[T]{}, fmt.Errorf("unknown object type")
+	}
+	return Change[T]{Old: oldObj, New: newObj, ChangeType: ct, ObjectType: ot}, nil
+}
+
+// MustNewChange creates a new Change. It panics if an error occurs.
+func MustNewChange[T K8Object](newObj, oldObj T, ct ChangeType) Change[T] {
+	c, err := NewChange(newObj, oldObj, ct)
+	if err != nil {
+		panic(err)
+	}
+	return c
+}
+
+// Validate validates the change object is correct.
+func (c Change[T]) Validate() error {
+	if c.ChangeType == CTUnknown {
+		return ErrInvalidType
+	}
+	if c.ObjectType == OTUnknown {
+		return ErrInvalidType
+	}
+	if c.ChangeType == CTAdd && reflect.ValueOf(c.New).IsZero() {
+		return ErrInvalidType
+	}
+	if c.ChangeType == CTUpdate && (reflect.ValueOf(c.New).IsZero() || reflect.ValueOf(c.Old).IsZero()) {
+		return ErrInvalidType
+	}
+	if c.ChangeType == CTDelete && reflect.ValueOf(c.Old).IsZero() {
+		return ErrInvalidType
+	}
+	return nil
 }
 
 // UID returns the UID of the underlying object being changed.
