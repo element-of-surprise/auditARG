@@ -205,7 +205,7 @@ func (c *Reader) Run(ctx context.Context) error {
 	c.informer.Start(c.stop)
 
 	if !cache.WaitForCacheSync(c.stop, c.syncers...) {
-		close(c.stop)
+		c.started = false
 		c.stop = make(chan struct{})
 		return fmt.Errorf("failed to sync cache")
 	}

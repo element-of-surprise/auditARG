@@ -11,6 +11,7 @@ import (
 	"github.com/element-of-surprise/auditARG/tattler"
 	"github.com/element-of-surprise/auditARG/tattler/internal/batching"
 	ireader "github.com/element-of-surprise/auditARG/tattler/internal/readers/apiserver/informers"
+	"github.com/element-of-surprise/auditARG/tattler/internal/readers/apiserver/persistentvolumes"
 	"github.com/element-of-surprise/auditARG/tattler/internal/readers/data"
 
 	"github.com/go-json-experiment/json"
@@ -51,7 +52,7 @@ func main() {
 
 	tattlerInput := make(chan data.Entry, 5000)
 
-	t, err := tattler.New(tattlerInput, 5*time.Minute)
+	t, err := tattler.New(tattlerInput, 5*time.Second)
 	if err != nil {
 		panic(err)
 	}
@@ -65,10 +66,17 @@ func main() {
 	}
 	t.AddReader(bkCtx, r)
 
-	// Add processors for output.
-	logInformersIn := make(chan batching.Batches, 1)
+	// Setup reader for persistent volumes custom informer.
+	pvReader, err := persistentvolumes.New(bkCtx, clientset, 30*time.Second)
+	if err != nil {
+		panic(err)
+	}
+	t.AddReader(bkCtx, pvReader)
 
-	if err := t.AddProcessor(bkCtx, "logInformers", logInformersIn); err != nil {
+	// Add processors for output.
+	logDataObjects := make(chan batching.Batches, 1)
+
+	if err := t.AddProcessor(bkCtx, "logDataObjects", logDataObjects); err != nil {
 		panic(err)
 	}
 
@@ -76,7 +84,7 @@ func main() {
 		panic(err)
 	}
 	log.Println("Started")
-	logInformers(bkCtx, logInformersIn) // blocks
+	logInformers(bkCtx, logDataObjects) // blocks
 	log.Println("exiting")
 }
 
@@ -132,7 +140,25 @@ func logInformers(ctx context.Context, in chan batching.Batches) {
 						log.Println("Namespace deleted:\n", mustJSONMarshal(ns.Old))
 					}
 				}
+			case data.ETPersistentVolume:
+				d, err := entry.PersistentVolume()
+				if err != nil {
+					panic(err)
+				}
+				pv, err := d.PersistentVolume()
+				if err != nil {
+					panic(err)
+				}
+				switch pv.ChangeType {
+				case data.CTAdd:
+					log.Println("PersistentVolume added:\n", mustJSONMarshal(pv.New))
+				case data.CTUpdate:
+					log.Println("PersistentVolume updated:\n", mustJSONMarshal(pv.New))
+				case data.CTDelete:
+					log.Println("PersistentVolume deleted:\n", mustJSONMarshal(pv.Old))
+				}
 			}
+
 		}
 	}
 }

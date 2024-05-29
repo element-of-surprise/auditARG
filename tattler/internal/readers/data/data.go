@@ -33,8 +33,9 @@ type EntryType uint8
 
 const (
 	//
-	ETUnknown  EntryType = 0 // Unknown
-	ETInformer EntryType = 1 // Informer
+	ETUnknown          EntryType = 0 // Unknown
+	ETInformer         EntryType = 1 // Informer
+	ETPersistentVolume EntryType = 2 // PersistentVolumes
 )
 
 // Entry is a data entry.
@@ -56,6 +57,8 @@ func NewEntry(data SourceData) (Entry, error) {
 	switch data.(type) {
 	case Informer:
 		return Entry{data: data, Type: ETInformer}, nil
+	case PersistentVolume:
+		return Entry{data: data, Type: ETPersistentVolume}, nil
 	}
 	return Entry{}, ErrInvalidType
 }
@@ -97,6 +100,21 @@ func (e Entry) Informer() (Informer, error) {
 	return v, nil
 }
 
+// PersistentVolume returns the entry data as a PersistentVolume. An error is returned if the type is not PersistentVolume.
+func (e Entry) PersistentVolume() (PersistentVolume, error) {
+	if e.Type != ETPersistentVolume {
+		return PersistentVolume{}, ErrInvalidType
+	}
+	if e.data == nil {
+		return PersistentVolume{}, ErrInvalidType
+	}
+	v, ok := e.data.(PersistentVolume)
+	if !ok {
+		return PersistentVolume{}, ErrInvalidType
+	}
+	return v, nil
+}
+
 //go:generate stringer -type=ObjectType -linecomment
 
 // ObjectType is the type of the object held in a type.
@@ -111,6 +129,8 @@ const (
 	OTPod ObjectType = 2 // Pod
 	// OTNamespace indicates the data is a namespace.
 	OTNamespace ObjectType = 3 // Namespace
+	// OTPersistentVolume indicates the data is a persistent volume.
+	OTPersistentVolume ObjectType = 4 // PersistentVolume
 )
 
 // Informer is data from an APIServer informer. This implementes SourceData.
@@ -136,7 +156,6 @@ func NewInformer[T K8Object](change Change[T]) (Informer, error) {
 }
 
 // MustNewInformer creates a new Informer. It panics if an error occurs.
-// Data must be a Change type.
 func MustNewInformer[T K8Object](change Change[T]) Informer {
 	i, err := NewInformer(change)
 	if err != nil {
@@ -211,6 +230,69 @@ func (i Informer) Namespace() (Change[*corev1.Namespace], error) {
 		return Change[*corev1.Namespace]{}, ErrInvalidType
 	}
 
+	return v, nil
+}
+
+// PersistentVolume is data from an custom APIServer informer that gets PersistentVolume information.
+// This implementes SourceData.
+// Note: This data type is field aligned for better performance.
+type PersistentVolume struct {
+	data any
+	uid  types.UID
+	// Type is the type of the data.
+	Type ObjectType
+}
+
+// NewPersistentVolume creates a new PersistentVolume custom Informer.
+func NewPersistentVolume[T K8Object](change Change[T]) (PersistentVolume, error) {
+	if err := change.Validate(); err != nil {
+		return PersistentVolume{}, err
+	}
+	uid, err := change.UID()
+	if err != nil {
+		return PersistentVolume{}, err
+	}
+
+	return PersistentVolume{data: change, uid: uid, Type: change.ObjectType}, nil
+}
+
+// MustNewPersistentVolume creates a new PersistentVolume Informer. It panics if an error occurs.
+func MustNewPersistentVolume[T K8Object](change Change[T]) PersistentVolume {
+	i, err := NewPersistentVolume(change)
+	if err != nil {
+		panic(err)
+	}
+	return i
+}
+
+// GetUID returns the UID of the underlying object.
+func (i PersistentVolume) GetUID() types.UID {
+	return i.uid
+}
+
+// Object returns the data as a runtime.Object. This is always for latest change, in the case that this
+// is an update. This returns nil if the object is of a type we don't understand.
+func (i PersistentVolume) Object() runtime.Object {
+	switch v := i.data.(type) {
+	case Change[*corev1.PersistentVolume]:
+		if v.ChangeType == CTDelete {
+			return v.Old
+		}
+		return v.New
+	}
+	return nil
+}
+
+// Node returns the data for a Node type change. An error is returned if the type is not Node.
+func (i PersistentVolume) PersistentVolume() (Change[*corev1.PersistentVolume], error) {
+	if i.data == nil {
+		return Change[*corev1.PersistentVolume]{}, ErrInvalidType
+	}
+
+	v, ok := i.data.(Change[*corev1.PersistentVolume])
+	if !ok {
+		return Change[*corev1.PersistentVolume]{}, ErrInvalidType
+	}
 	return v, nil
 }
 

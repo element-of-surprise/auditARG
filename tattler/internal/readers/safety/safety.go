@@ -22,7 +22,6 @@ package safety
 
 import (
 	"fmt"
-	"log"
 	"log/slog"
 	"regexp"
 
@@ -31,6 +30,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+// Secrets provide a set of safety checks for exposing Kubernetes resources to the outside world.
+// It currently scrubs sensitive information from informers that have pods with containers that have
+// environment variables with names that match a secret regular expression.
 type Secrets struct {
 	in  <-chan data.Entry
 	out chan data.Entry
@@ -102,17 +104,13 @@ func (s *Secrets) informerScrubber(e data.Entry) error {
 		return err
 	}
 
-	log.Println("what is iType: ", i.Type)
 	switch i.Type {
 	case data.OTPod:
-		log.Println("was a pod")
 		p, ok := i.Object().(*corev1.Pod)
 		if !ok {
-			log.Println("not an object")
 			return fmt.Errorf("safety.Secrets.informerRouter: error casting object to pod: %v", err)
 		}
 		s.scrubPod(p)
-		log.Println("called")
 	}
 	return nil
 }
