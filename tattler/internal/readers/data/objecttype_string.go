@@ -12,11 +12,12 @@ func _() {
 	_ = x[OTNode-1]
 	_ = x[OTPod-2]
 	_ = x[OTNamespace-3]
+	_ = x[OTPersistentVolume-4]
 }
 
-const _ObjectType_name = "UnknownNodePodNamespace"
+const _ObjectType_name = "UnknownNodePodNamespacePersistentVolume"
 
-var _ObjectType_index = [...]uint8{0, 7, 11, 14, 23}
+var _ObjectType_index = [...]uint8{0, 7, 11, 14, 23, 39}
 
 func (i ObjectType) String() string {
 	if i >= ObjectType(len(_ObjectType_index)-1) {

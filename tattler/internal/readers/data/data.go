@@ -144,6 +144,11 @@ type Informer struct {
 
 // NewInformer creates a new Informer. Data must be a Change type.
 func NewInformer[T K8Object](change Change[T]) (Informer, error) {
+	switch change.ObjectType {
+	case OTNode, OTPod, OTNamespace:
+	default:
+		return Informer{}, ErrInvalidType
+	}
 	if err := change.Validate(); err != nil {
 		return Informer{}, err
 	}
@@ -245,6 +250,11 @@ type PersistentVolume struct {
 
 // NewPersistentVolume creates a new PersistentVolume custom Informer.
 func NewPersistentVolume[T K8Object](change Change[T]) (PersistentVolume, error) {
+	switch change.ObjectType {
+	case OTPersistentVolume:
+	default:
+		return PersistentVolume{}, ErrInvalidType
+	}
 	if err := change.Validate(); err != nil {
 		return PersistentVolume{}, err
 	}

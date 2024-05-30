@@ -10,11 +10,12 @@ func _() {
 	var x [1]struct{}
 	_ = x[ETUnknown-0]
 	_ = x[ETInformer-1]
+	_ = x[ETPersistentVolume-2]
 }
 
-const _EntryType_name = "UnknownInformer"
+const _EntryType_name = "UnknownInformerPersistentVolumes"
 
-var _EntryType_index = [...]uint8{0, 7, 15}
+var _EntryType_index = [...]uint8{0, 7, 15, 32}
 
 func (i EntryType) String() string {
 	if i >= EntryType(len(_EntryType_index)-1) {

@@ -192,7 +192,7 @@ func TestAddOrDelete(t *testing.T) {
 			name: "Node add",
 			obj:  &corev1.Node{},
 			ct:   data.CTAdd,
-			want: MustInformer(
+			want: data.MustNewInformer(
 				data.Change[*corev1.Node]{
 					ChangeType: data.CTAdd,
 					ObjectType: data.OTNode,
@@ -204,7 +204,7 @@ func TestAddOrDelete(t *testing.T) {
 			name: "Pod add",
 			obj:  &corev1.Pod{},
 			ct:   data.CTAdd,
-			want: MustInformer(
+			want: data.MustNewInformer(
 				data.Change[*corev1.Pod]{
 					ChangeType: data.CTAdd,
 					ObjectType: data.OTPod,
@@ -216,7 +216,7 @@ func TestAddOrDelete(t *testing.T) {
 			name: "Namespace add",
 			obj:  &corev1.Namespace{},
 			ct:   data.CTAdd,
-			want: MustInformer(
+			want: data.MustNewInformer(
 				data.Change[*corev1.Namespace]{
 					ChangeType: data.CTAdd,
 					ObjectType: data.OTNamespace,
@@ -228,7 +228,7 @@ func TestAddOrDelete(t *testing.T) {
 			name: "Node delete",
 			obj:  &corev1.Node{},
 			ct:   data.CTDelete,
-			want: MustInformer(
+			want: data.MustNewInformer(
 				data.Change[*corev1.Node]{
 					ChangeType: data.CTDelete,
 					ObjectType: data.OTNode,
@@ -240,7 +240,7 @@ func TestAddOrDelete(t *testing.T) {
 			name: "Pod delete",
 			obj:  &corev1.Pod{},
 			ct:   data.CTDelete,
-			want: MustInformer(
+			want: data.MustNewInformer(
 				data.Change[*corev1.Pod]{
 					ChangeType: data.CTDelete,
 					ObjectType: data.OTPod,
@@ -252,7 +252,7 @@ func TestAddOrDelete(t *testing.T) {
 			name: "Namespace delete",
 			obj:  &corev1.Namespace{},
 			ct:   data.CTDelete,
-			want: MustInformer(
+			want: data.MustNewInformer(
 				data.Change[*corev1.Namespace]{
 					ChangeType: data.CTDelete,
 					ObjectType: data.OTNamespace,
@@ -280,10 +280,12 @@ func TestAddOrDelete(t *testing.T) {
 		got, err := e.Informer()
 		if err != nil {
 			t.Errorf("TestAddOrDelete(%s): got err == %v, want err == nil", test.name, err)
+			continue
 		}
 
 		if diff := pretty.Compare(test.want, got); diff != "" {
 			t.Errorf("TestAddOrDelete(%s): -want/+got\n%s", test.name, diff)
+			continue
 		}
 	}
 }
@@ -323,7 +325,7 @@ func TestUpdate(t *testing.T) {
 			name:   "Node update",
 			oldObj: &corev1.Node{},
 			newObj: &corev1.Node{},
-			want: MustInformer(data.Change[*corev1.Node]{
+			want: data.MustNewInformer(data.Change[*corev1.Node]{
 				ChangeType: data.CTUpdate,
 				ObjectType: data.OTNode,
 				New:        &corev1.Node{},
@@ -334,7 +336,7 @@ func TestUpdate(t *testing.T) {
 			name:   "Pod update",
 			oldObj: &corev1.Pod{},
 			newObj: &corev1.Pod{},
-			want: MustInformer(
+			want: data.MustNewInformer(
 				data.Change[*corev1.Pod]{
 					ChangeType: data.CTUpdate,
 					ObjectType: data.OTPod,
@@ -347,7 +349,7 @@ func TestUpdate(t *testing.T) {
 			name:   "Namespace update",
 			oldObj: &corev1.Namespace{},
 			newObj: &corev1.Namespace{},
-			want: MustInformer(
+			want: data.MustNewInformer(
 				data.Change[*corev1.Namespace]{
 					ChangeType: data.CTUpdate,
 					ObjectType: data.OTNamespace,
@@ -377,18 +379,12 @@ func TestUpdate(t *testing.T) {
 		got, err := e.Informer()
 		if err != nil {
 			t.Errorf("TestUpdate(%s): got err == %v, want err == nil", test.name, err)
+			continue
 		}
 
 		if diff := pretty.Compare(test.want, got); diff != "" {
 			t.Errorf("TestUpdate(%s): -want/+got\n%s", test.name, diff)
+			continue
 		}
 	}
-}
-
-func MustInformer[T data.K8Object](v data.Change[T]) data.Informer {
-	i, err := data.NewInformer(v)
-	if err != nil {
-		panic(err)
-	}
-	return i
 }

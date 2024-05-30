@@ -23,7 +23,6 @@ type Reader struct {
 	ch       chan data.Entry
 
 	started bool
-	index   cache.SharedIndexInformer
 	stop    chan struct{}
 
 	log *slog.Logger
@@ -219,6 +218,7 @@ func (c *Reader) update(oldObj any, newObj any) error {
 	var d data.PersistentVolume
 	switch v := newObj.(type) {
 	case *v1.PersistentVolume:
+		log.Println("happened")
 		pvc := data.Change[*v1.PersistentVolume]{
 			ChangeType: data.CTUpdate,
 			ObjectType: data.OTPersistentVolume,
@@ -229,6 +229,7 @@ func (c *Reader) update(oldObj any, newObj any) error {
 		var err error
 		d, err = data.NewPersistentVolume(pvc)
 		if err != nil {
+			panic("wtf")
 			return err
 		}
 	default:
