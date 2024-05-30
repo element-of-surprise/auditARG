@@ -3,10 +3,12 @@ package tattler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/element-of-surprise/auditARG/tattler/internal/batching"
+	preprocess "github.com/element-of-surprise/auditARG/tattler/internal/preproccessing"
 	"github.com/element-of-surprise/auditARG/tattler/internal/readers/data"
 	"github.com/element-of-surprise/auditARG/tattler/internal/readers/safety"
 	"github.com/element-of-surprise/auditARG/tattler/internal/routing"
@@ -22,45 +24,94 @@ type Reader interface {
 	Run(context.Context) error
 }
 
+// PreProcessor is function that processes data before it is sent to a processor. It must be thread-safe.
+// This is where you would alter data before it is sent for processing. Any change here affects
+// all processors.
+type PreProcessor = preprocess.PreProcessor
+
 // Runner runs readers and sends the output through a series data modifications and batching until
 // it is sent to data processors.
 type Runner struct {
-	input   chan data.Entry
-	secrets *safety.Secrets
-	batcher *batching.Batcher
-	router  *routing.Batches
-	readers []Reader
+	input         chan data.Entry
+	secrets       *safety.Secrets
+	batcher       *batching.Batcher
+	router        *routing.Batches
+	readers       []Reader
+	preProcessors []PreProcessor
+
+	logger *slog.Logger
 
 	mu      sync.Mutex
 	started bool
 }
 
+// Option is an option for New().
+type Option func(*Runner) error
+
+// WithLogger sets the logger. Defaults to slog.Default().
+func WithLogger(l *slog.Logger) Option {
+	return func(r *Runner) error {
+		if l == nil {
+			return fmt.Errorf("logger cannot be nil")
+		}
+		r.logger = l
+		return nil
+	}
+}
+
+// WithPreProcessor appends PreProcessors to the Runner.
+func WithPreProcessor(p ...PreProcessor) Option {
+	return func(r *Runner) error {
+		r.preProcessors = append(r.preProcessors, p...)
+		return nil
+	}
+}
+
 // New constructs a new Runner.
-func New(input chan data.Entry, batchTimespan time.Duration) (*Runner, error) {
+func New(ctx context.Context, in chan data.Entry, batchTimespan time.Duration, options ...Option) (*Runner, error) {
+	r := &Runner{
+		input:  in,
+		logger: slog.Default(),
+	}
+
+	for _, o := range options {
+		if err := o(r); err != nil {
+			return nil, err
+		}
+	}
+
 	batchingIn := make(chan data.Entry, 1)
 	routerIn := make(chan batching.Batches, 1)
 
-	secrets, err := safety.New(input, batchingIn)
+	var secretsIn = in
+
+	if r.preProcessors != nil {
+		secretsIn = make(chan data.Entry, 1)
+		_, err := preprocess.New(ctx, in, secretsIn, r.preProcessors, preprocess.WithLogger(r.logger))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	secrets, err := safety.New(ctx, secretsIn, batchingIn)
 	if err != nil {
 		return nil, err
 	}
 
-	batcher, err := batching.New(batchingIn, routerIn, batchTimespan)
+	batcher, err := batching.New(ctx, batchingIn, routerIn, batchTimespan)
 	if err != nil {
 		return nil, err
 	}
 
-	router, err := routing.New(routerIn)
+	router, err := routing.New(ctx, routerIn)
 	if err != nil {
 		return nil, err
 	}
 
-	r := &Runner{
-		secrets: secrets,
-		batcher: batcher,
-		router:  router,
-		input:   input,
-	}
+	r.secrets = secrets
+	r.batcher = batcher
+	r.router = router
+
 	return r, nil
 }
 

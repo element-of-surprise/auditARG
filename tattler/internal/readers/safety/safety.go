@@ -3,7 +3,7 @@ Package safety provides a set of safety checks for exposing Kubernetes resources
 
 Usage:
 
-	s := safety.New(in, out, safety.WithLogger(l))
+	s := safety.New(ctx, in, out, safety.WithLogger(l))
 
 	// Read entries that have been scrubbed of sensitive information.
 	go func() {
@@ -21,6 +21,7 @@ Usage:
 package safety
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -53,7 +54,7 @@ func WithLogger(l *slog.Logger) Option {
 
 // New creates a new Secrets. The pipeline is ready once New() is called successfully.
 // Closing in will close out.
-func New(in <-chan data.Entry, out chan data.Entry, options ...Option) (*Secrets, error) {
+func New(ctx context.Context, in <-chan data.Entry, out chan data.Entry, options ...Option) (*Secrets, error) {
 	if in == nil || out == nil {
 		panic("can't call Secrets.New() with a nil in or out channel")
 	}

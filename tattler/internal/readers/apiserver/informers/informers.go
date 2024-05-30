@@ -28,7 +28,7 @@ Usage:
 
 	// This will create a new reader that will stream node and pod data.
 	// RTNode and RTPod are the types of data to retrieve as bitwise flags.
-	c, err := New(informer, retrieveTypes RetrieveType, RTNode | RTPod)
+	c, err := New(ctx, informer, retrieveTypes RetrieveType, RTNode | RTPod)
 	if err != nil {
 		// Do something
 	}
@@ -116,7 +116,7 @@ const (
 )
 
 // New creates a new Changes object. retrieveTypes is a bitwise flag to determine what data to retrieve.
-func New(informer informers.SharedInformerFactory, retrieveTypes RetrieveType, opts ...Option) (*Reader, error) {
+func New(ctx context.Context, informer informers.SharedInformerFactory, retrieveTypes RetrieveType, opts ...Option) (*Reader, error) {
 	if informer == nil {
 		return nil, fmt.Errorf("informer is nil")
 	}

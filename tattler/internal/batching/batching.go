@@ -12,7 +12,7 @@ we emit the batch.
 
 Usage is pretty simple:
 
-	batcher, err := batching.New(5 * time.Second)
+	batcher, err := batching.New(ctx, 5 * time.Second)
 	if err != nil {
 		// Do something
 	}
@@ -99,7 +99,7 @@ func WithLogger(log *slog.Logger) Option {
 }
 
 // New creates a new Batcher.
-func New(in <-chan data.Entry, out chan Batches, timespan time.Duration, options ...Option) (*Batcher, error) {
+func New(ctx context.Context, in <-chan data.Entry, out chan Batches, timespan time.Duration, options ...Option) (*Batcher, error) {
 	if in == nil || out == nil {
 		return nil, errors.New("can't call Batcher.New() with a nil in or out channel")
 	}

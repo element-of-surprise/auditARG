@@ -52,7 +52,7 @@ func main() {
 
 	tattlerInput := make(chan data.Entry, 5000)
 
-	t, err := tattler.New(tattlerInput, 5*time.Second)
+	t, err := tattler.New(bkCtx, tattlerInput, 5*time.Second)
 	if err != nil {
 		panic(err)
 	}

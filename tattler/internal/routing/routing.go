@@ -4,7 +4,7 @@ that wish to process the information.
 
 Usage:
 
-	router, err := router.New(in)
+	router, err := router.New(ctx, in)
 	if err != nil {
 		// Do something
 	}
@@ -60,7 +60,7 @@ func WithLogger(l *slog.Logger) Option {
 }
 
 // New is the constructor for Batches.
-func New(input chan batching.Batches, options ...Option) (*Batches, error) {
+func New(ctx context.Context, input chan batching.Batches, options ...Option) (*Batches, error) {
 	if input == nil {
 		return nil, errors.New("routing.New: input channel cannot be nil")
 	}
