@@ -29,7 +29,7 @@ func TestNew(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		b, err := New(test.input)
+		b, err := New(context.Background(), test.input)
 		switch {
 		case err == nil && test.wantErr:
 			t.Errorf("TestNew(%s): got err == nil, want err != nil", test.name)

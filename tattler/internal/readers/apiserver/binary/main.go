@@ -60,7 +60,7 @@ func main() {
 	// Setup reader for APIServer informers.
 	informerFactory := informers.NewSharedInformerFactory(clientset, 5*time.Second)
 
-	r, err := ireader.New(informerFactory, ireader.RTNode|ireader.RTPod|ireader.RTNamespace)
+	r, err := ireader.New(bkCtx, informerFactory, ireader.RTNode|ireader.RTPod|ireader.RTNamespace)
 	if err != nil {
 		panic(err)
 	}
