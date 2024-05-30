@@ -3,6 +3,7 @@ package tattler
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/element-of-surprise/auditARG/tattler/internal/batching"
@@ -30,6 +31,7 @@ type Runner struct {
 	router  *routing.Batches
 	readers []Reader
 
+	mu      sync.Mutex
 	started bool
 }
 
@@ -63,20 +65,30 @@ func New(input chan data.Entry, batchTimespan time.Duration) (*Runner, error) {
 }
 
 // AddReader adds a reader's output channel as input to be processed. A Reader does not need to have
-// SetOut() or Run() called, as these are handled by AddReader() and Start().
+// SetOut() or Run() called, as these are handled by AddReader() and Start(). You can add a reader
+// after Start() has been called. This allows staggering the start of readers.
 func (r *Runner) AddReader(ctx context.Context, reader Reader) error {
-	if r.started {
-		return fmt.Errorf("cannot add a reader after Runner has started")
-	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if err := reader.SetOut(ctx, r.input); err != nil {
 		return fmt.Errorf("Reader(%T).SetOut(): %w", r, err)
+	}
+	if r.started {
+		if err := reader.Run(ctx); err != nil {
+			return fmt.Errorf("reader(%T): %w", reader, err)
+		}
 	}
 	r.readers = append(r.readers, reader)
 	return nil
 }
 
-// AddProcessor registers a processors input to receive Batches data.
+// AddProcessor registers a processors input to receive Batches data. This cannot be called
+// after Start() has been called.
 func (r *Runner) AddProcessor(ctx context.Context, name string, in chan batching.Batches) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if r.started {
 		return fmt.Errorf("cannot add a processor after Runner has started")
 	}
@@ -85,6 +97,9 @@ func (r *Runner) AddProcessor(ctx context.Context, name string, in chan batching
 
 // Start starts the Runner.
 func (r *Runner) Start(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	for _, reader := range r.readers {
 		if err := reader.Run(ctx); err != nil {
 			return fmt.Errorf("reader(%T): %w", reader, err)
